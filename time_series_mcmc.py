@@ -23,11 +23,11 @@ parser.add_argument('-s', '--samples', help='Number of samples',
 # parser.add_argument('-swap','--swap', help='Swap Ratio', dest="swap_ratio",default=0.001,type=float)
 parser.add_argument('-b', '--burn', help='How many samples to discard before determing posteriors',
 					dest="burn_in", default=0.5, type=float)
-# parser.add_argument('-pt','--ptsamples', help='Ratio of PT vs straight MCMC samples to run', dest="pt_samples",default=0.5,type=float)
+parser.add_argument('-pt','--ptsamples', help='Ratio of PT vs straight MCMC samples to run', dest="pt_samples",default=0.5,type=float)
 parser.add_argument('-step', '--step', help='Step size for proposals (0.02, 0.05, 0.1 etc)',
-					dest="step_size", default=0.025, type=float)
+					dest="step_size", default=0.005, type=float)
 parser.add_argument('-lr', '--learn', help='learn rate for langevin gradient',
-					dest="learn_rate", default=0.05, type=float)
+					dest="learn_rate", default=0.001, type=float)
 parser.add_argument('-m', '--model', help='1 to select RNN, 2 to select LSTM',
 					dest="net", default=2, type=int)
 parser.add_argument('-o', '--optim', help='1 to select SGD, 2 to select Adam',
@@ -226,6 +226,7 @@ class MCMC:
 		# store a list of accepted likelihoods for accepted proposals only for plotting 
 		likeh_list_accepted = np.zeros((self.samples,1 ))
 		likeh_list_accepted[0,:] = [-100]
+		mh_prob_stats = np.zeros((self.samples, 4))
 
 
 		if self.optimizer == 'SGD':
@@ -242,12 +243,12 @@ class MCMC:
 		tau_pro = np.exp(eta)
 
 		eta = 0
-		step_w = 0.01
+		step_w = args.step_size
 		step_eta = 0.2
 		sigma_squared = 25
 		nu_1 = 0
 		nu_2 = 0
-
+		print(step_w, " step_w")
 		sigma_diagmat = np.zeros((w_size, w_size))
 		np.fill_diagonal(sigma_diagmat, step_w**2)
 		prior_current = self.prior_likelihood(
@@ -257,7 +258,7 @@ class MCMC:
 		[_, pred_test, rmsetest, step_wise_rmsetest] = self.likelihood_func(
 			self.rnn, self.test_x, self.test_y, copy.deepcopy(w), tau_pro, temp=1)
 
-		scaling_factor = 1  # 0.01
+		scaling_factor = 1  #0.05#1  # 0.01
 
 		for i in range(self.samples - 1):
 			timer_start = time.time()
@@ -298,14 +299,27 @@ class MCMC:
 
 			try:
 				mh_prob = diff_likelihood + diff_prior + diff_prop
+				mh_prob = min(1,math.exp(mh_prob))  #this is giving a slightly better accept_percentage
 			except OverflowError as e:
 				mh_prob = 1
 
+			
+
 			accept_list[i+1] = num_accepted
-			u = np.log(random.uniform(0, 1))
+			# u = np.log(random.uniform(0, 1))
+			u = random.uniform(0,1)
+			# print(f'diff_likelihood: {diff_likelihood}, diff_prior: {diff_prior}, diff_prop: {diff_prop}')
+			# print(mh_prob," is mh_prob and us is ",u )
+			
+			# diff_prop is value responsible for distortion, its largely negative
+			
+			mh_prob_stats[i:,] = [diff_likelihood]
+			mh_prob_stats[i:,] = [diff_prior]
+			mh_prob_stats[i:,] = [diff_prop]
+			mh_prob_stats[i:,] = [mh_prob]
 			prop_list[i+1, ] = self.rnn.getparameters(w_proposal).reshape(-1)
 			likeh_list[i+1, 0] = likelihood_proposal
-			if u < mh_prob:
+			if u < mh_prob:   # the correct condition is u<mh_prob
 				num_accepted = num_accepted + 1
 				likelihood = likelihood_proposal
 				prior_current = prior_prop
@@ -329,7 +343,22 @@ class MCMC:
 
 		# pos_w is the list of all parameter_proposals- rejected as well accepted
 		# rmse_train, rmse_test, step_wise_rmse_train, step_wise_rmse_test -> accepted as well rejected
-		return(pos_w, rmse_train, step_wise_rmse_train, rmse_test, step_wise_rmse_test, likeh_list, likeh_list_accepted)
+		
+		burnin = int(args.burn_in * self.samples)
+		accept_percent = ((num_accepted)/self.samples)*100
+		pos_w = pos_w[burnin:,:]
+		rmse_train = rmse_train[burnin:]
+		rmse_test = rmse_test[burnin:]
+		step_wise_rmse_test = step_wise_rmse_test[burnin:,:]
+		step_wise_rmse_train = step_wise_rmse_train[burnin:,:]
+		likeh_list = likeh_list[burnin:,:]
+		likeh_list_accepted = likeh_list_accepted[burnin:,:]
+		mh_prob_stats = mh_prob_stats[burnin:,:]
+		return(pos_w, rmse_train, 
+			   step_wise_rmse_train, 
+			   rmse_test, step_wise_rmse_test, 
+			   likeh_list, likeh_list_accepted, 
+			   accept_percent, mh_prob_stats)
 
 
 def main():
@@ -340,7 +369,7 @@ def main():
 	print("Name of folder to look for: ", os.getcwd() +
 		  '/Res_LG-Lprob_'+net+f'_{optimizer}_single_chain/')
 
-	for j in [2]:
+	for j in [1,2]:
 		# for j in [2]:
 		print(j, ' out of 15', '\n\n\n')
 		#i = j//2
@@ -411,24 +440,103 @@ def main():
 		use_langevin_gradients = True
 		print(f'Langevin is {use_langevin_gradients}')
 
-		langevin_prob = 0.9
+		langevin_prob = args.pt_samples #0.9
 		path = None
 
 		# mcmc = MCMC(use_langevin_gradients, langevin_prob,
 		# 			learn_rate, NumSample, train_x,
 		# 			train_y, test_x, test_y,
 		# 			topology,path, net, optimizer)
+		if(problem == 1):
+			NumSample = 10
+		else:
+			NumSample = args.samples
 		mcmc = MCMC(use_langevin_gradients, l_prob=langevin_prob,
 					learn_rate=learn_rate, samples=NumSample, trainx=train_x,
 					trainy=train_y, testx=test_x, testy=test_y,
 					topology=topology, path=path, rnn_net=net, optimizer=optimizer)
 		[pos_w, rmse_train, indiv_rmse_train, rmse_test,
-			indiv_rmse_test, likelihoods_all, accepted_likelihoods] = mcmc.sampler()
+		indiv_rmse_test, likelihoods_all, accepted_likelihoods, 
+		accept_percent,mh_prob_stats] = mcmc.sampler()
+		print(pos_w.shape, " number of parameters trained")
 
-		a = [pos_w, rmse_train, indiv_rmse_train, rmse_test,
-			indiv_rmse_test, likelihoods_all, accepted_likelihoods]
-		print(likelihoods_all.size)
-		print(accepted_likelihoods.size)
+		rmse_tr = np.mean(rmse_train[:])
+		rmse_tr_std = np.std(rmse_train[:])
+		rmse_tr_max = np.amin(rmse_train[:])
+		rmse_tes = np.mean(rmse_test[:])
+		rmse_tes_std = np.std(rmse_test[:])
+		rmse_tes_max = np.amin(rmse_test[:])
+		log_ = f"The accept percentage is: {accept_percent}\nrmse_train: {rmse_tr} rmse_train_std: {rmse_tr_std}  rmse_tr_best: {rmse_tr_max}\nrmse_test: {rmse_tes}  rmse_test_std: {rmse_tes_std}  rmse_test_best: {rmse_tes_max}\n"
+		# print(f"The accept percentage is: {accept_percent}")
+		# print(f'rmse_train: {rmse_tr}  rmse_train_std: {rmse_tr_std}  rmse_tr_best: {rmse_tr_max}')
+		# print(f'rmse_test: {rmse_tes}  rmse_test_std: {rmse_tes_std}  rmse_test_best: {rmse_tes_max}')
+		log_file = open(f"./{name}_tuning.txt","a")
+		log_file.write(f"\n\n==================={name}=================\n")
+		log_file.write(f"learning_rate = {learn_rate}; samples = {NumSample}; step_w = {args.step_size}\n")
+		log_file.write(f"rnn_net = {net}; optimizer = {optimizer}; l_prob = {langevin_prob}")
+		log_file.write(log_)
+		print(log_)
+		log_file.close()
+
+
+		# problemFolder = f"{name}_{NumSample}samples_{net}_{optimizer}"
+		# if(!os.path.exists(f"./{problemFolder}")):
+		# 	os.mkdir(f"./{problemFolder}")
+
+		
+
+
+
+
+		
+		plt.plot(mh_prob_stats[:,0], label = 'diff_likelihood')
+		plt.plot(mh_prob_stats[:,1], label = 'diff_prior')
+		plt.plot(mh_prob_stats[:,2], label = 'diff_prop')
+		plt.plot(mh_prob_stats[:,3], label = 'mh_prob')
+		plt.legend(loc = 'upper right')
+		plt.xlabel('Samples',fontsize = 12)
+		plt.ylabel('mh_prob_stats',fontsize = 12)
+		plt.savefig('mh_prob_stats.png')
+		plt.legend(['diff_likelihood', 'diff_prior', 'diff_prop', 'mh_prob'])
+		plt.clf()
+
+		plt.plot(likelihoods_all[:,0])
+		plt.xlabel('Samples',fontsize = 12)
+		plt.ylabel('likelihood',fontsize = 12)
+		plt.savefig('likelihoods_all.png')
+		plt.clf()
+
+		plt.plot(accepted_likelihoods)
+		plt.xlabel('Samples',fontsize = 12)
+		plt.ylabel('likelihood',fontsize = 12)
+		plt.savefig('likelihoods_accepted.png')
+		plt.clf()
+
+		for i in range(10):
+			plt.plot(indiv_rmse_train[:,i],label = f'step {i+1}');
+		plt.legend(loc = 'upper right')
+		plt.xlabel('Samples',fontsize = 12)
+		plt.ylabel('Rmse',fontsize= 12)
+		plt.savefig('step_wise_rmse_train.png')
+		plt.clf()
+
+		for i in range(10):
+			plt.plot(indiv_rmse_test[:,i],label = f'step {i+1}');
+		plt.legend(loc = 'upper right')
+		plt.xlabel('Samples',fontsize = 12)
+		plt.ylabel('Rmse',fontsize= 12)
+		plt.savefig('step_wise_rmse_test.png')
+		plt.clf()
+
+		plt.plot(rmse_train, label = 'train')
+		plt.plot(rmse_test, label = 'test')
+		plt.legend(loc = 'upper right')
+		plt.xlabel('Samples',fontsize = 12)
+		plt.ylabel('Rmse',fontsize= 12)
+		plt.savefig('rmse.png')
+		plt.clf()
+
+	gc.collect()
 
 if __name__ == "__main__":
 	main()
