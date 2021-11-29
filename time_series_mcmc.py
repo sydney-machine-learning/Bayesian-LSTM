@@ -479,9 +479,23 @@ def main():
 		log_file.close()
 
 
-		# problemFolder = f"{name}_{NumSample}samples_{net}_{optimizer}"
-		# if(!os.path.exists(f"./{problemFolder}")):
-		# 	os.mkdir(f"./{problemFolder}")
+		problemFolder = os.getcwd() + f'/SingleChain_{net}_{optimizer}/'
+		folder_number = 0
+		while os.path.exists(problemFolder+f'{name}_/{folder_number}'):
+			folder_number+=1
+
+		if not os.path.exists(problemFolder + f'{name}_/{folder_number}'):
+			os.makedirs(problemFolder+ f'{name}_/{folder_number}')
+			path = (problemFolder+ f'{name}_/{folder_number}')
+
+		directories = [
+			path+'/predictions/', 
+			path+'/posterior', #to store all the plots of weight distributions
+			path+'/results',#to store rmse values
+			path+'/posterior/pos_w',#to store pos_w and other plots
+			path+'/posterior/pos_likelihood', #likelihoods_all, likelihoods_accepted, 
+			path+'/posterior/accept_list'
+		]
 
 		
 
