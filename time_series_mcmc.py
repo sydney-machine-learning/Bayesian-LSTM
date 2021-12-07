@@ -17,12 +17,12 @@ import gc
 mpl.use('agg')
 parser = argparse.ArgumentParser(description='PTBayeslands modelling')
 parser.add_argument('-s', '--samples', help='Number of samples',
-					default=1000, dest="samples", type=int)
+					default=5000, dest="samples", type=int)
 # parser.add_argument('-r','--replicas', help='Number of chains/replicas, best to have one per availble core/cpu', default=8,dest="num_chains",type=int)
 # parser.add_argument('-t','--temperature', help='Demoninator to determine Max Temperature of chains (MT=no.chains*t) ', default=2,dest="mt_val",type=int)
 # parser.add_argument('-swap','--swap', help='Swap Ratio', dest="swap_ratio",default=0.001,type=float)
 parser.add_argument('-b', '--burn', help='How many samples to discard before determing posteriors',
-					dest="burn_in", default=0.5, type=float)
+					dest="burn_in", default=0.6, type=float)
 parser.add_argument('-pt','--ptsamples', help='Ratio of PT vs straight MCMC samples to run', dest="pt_samples",default=0.5,type=float)
 parser.add_argument('-step', '--step', help='Step size for proposals (0.02, 0.05, 0.1 etc)',
 					dest="step_size", default=0.005, type=float)
