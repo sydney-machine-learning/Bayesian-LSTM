@@ -28,6 +28,7 @@ parser.add_argument('-step', '--step', help='Step size for proposals (0.02, 0.05
 					dest="step_size", default=0.005, type=float)
 parser.add_argument('-lr', '--learn', help='learn rate for langevin gradient',
 					dest="learn_rate", default=0.001, type=float)
+parser.add_argument('-lrab', '--lrab', help = "learning rate after burnin period", dest = "learn_rate_after_burnin", default = 0.5, type = float)
 parser.add_argument('-m', '--model', help='1 to select RNN, 2 to select LSTM',
 					dest="net", default=2, type=int)
 parser.add_argument('-o', '--optim', help='1 to select SGD, 2 to select Adam',
@@ -161,6 +162,7 @@ class MCMC:
 		self.use_langevin_gradients = use_langevin_gradients
 		self.l_prob = l_prob
 		self.learn_rate = learn_rate
+		self.learn_rate_after_burnin = args.learn_rate_after_burnin
 		self.rnn = Model(topo=topology, lrate=learn_rate,
 						 input_size=1, rnn_net=rnn_net, optimizer=optimizer)
 
@@ -229,6 +231,8 @@ class MCMC:
 		mh_prob_stats = np.zeros((self.samples, 4))
 
 
+
+
 		if self.optimizer == 'SGD':
 			optimizer = torch.optim.SGD(
 				self.rnn.parameters(), lr=self.learn_rate)
@@ -256,12 +260,16 @@ class MCMC:
 		[likelihood, pred_train, rmsetrain, step_wise_rmsetrain] = self.likelihood_func(
 			self.rnn, self.train_x, self.train_y, copy.deepcopy(w), tau_pro, temp=1)
 		[_, pred_test, rmsetest, step_wise_rmsetest] = self.likelihood_func(
-			self.rnn, self.test_x, self.test_y, copy.deepcopy(w), tau_pro, temp=1)
+			self.rnn, self.test_x, self.test_y,copy.deepcopy(w), tau_pro, temp=1)
 
 		scaling_factor = 1  #0.05#1  # 0.01
 
 		for i in range(self.samples - 1):
 			timer_start = time.time()
+			if i == pt_samples: 
+				optimizer = torch.optim.SGD(self.rnn.parameters(),
+							lr = self.learn_rate_after_burnin)
+
 			lx = np.random.uniform(0, 1, 1)
 			if(self.use_langevin_gradients and lx < self.l_prob):
 				w_gd = copy.deepcopy(self.rnn.langevin_gradient(
@@ -344,8 +352,25 @@ class MCMC:
 		# pos_w is the list of all parameter_proposals- rejected as well accepted
 		# rmse_train, rmse_test, step_wise_rmse_train, step_wise_rmse_test -> accepted as well rejected
 		
+		
+		# plt.plot(likeh_list)
+		# plt.xlabel('Samples',fontsize = 12)
+		# plt.ylabel('likelihood',fontsize = 12)
+		# plt.savefig('./likelihoods_without_burnin.png')
+		# plt.clf()
+
+		# plt.plot(rmse_train)
+		# plt.plot(rmse_test)
+		# plt.xlabel('Samples',fontsize = 12)
+		# plt.ylabel('rmse',fontsize = 12)
+		# plt.savefig('./rmse without burnin.png')
+		# plt.clf()
+
+
 		burnin = int(args.burn_in * self.samples)
 		accept_percent = ((num_accepted)/self.samples)*100
+
+		# the below block decides whether burnin is to be applied or not
 		pos_w = pos_w[burnin:,:]
 		rmse_train = rmse_train[burnin:]
 		rmse_test = rmse_test[burnin:]
@@ -483,6 +508,7 @@ def main():
 		# print(f'rmse_test: {rmse_tes}  rmse_test_std: {rmse_tes_std}  rmse_test_best: {rmse_tes_max}')
 		log_file = open(f"./{name}_tuning.txt","a")
 		log_file.write(f"\n\n==================={name}=================\n")
+		log_file.write(f"SGD learning rate after burnin period: {args.learn_rate_after_burnin}\n")
 		log_file.write(f"learning_rate = {learn_rate}; samples = {NumSample}; step_w = {args.step_size}\n")
 		log_file.write(f"rnn_net = {net}; optimizer = {optimizer}; l_prob = {langevin_prob}")
 		log_file.write(log_)
